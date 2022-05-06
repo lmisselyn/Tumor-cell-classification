@@ -5,6 +5,25 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.impute import KNNImputer
 from sklearn.feature_selection import chi2, SelectKBest
+from sklearn.metrics import confusion_matrix
+from matplotlib import pyplot as plt
+
+
+# ------------------------------------BCR VISUALIZATION FOR ONE EXAMPLE--------------------------------------
+# -----------------------------------------------------------------------------------------------------------
+
+def visualize(x_test, y_test, model):
+    cm = confusion_matrix(y_test, model.predict(x_test))
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.imshow(cm)
+    ax.grid(False)
+    ax.xaxis.set(ticks=(0, 1), ticklabels=('Predicted 0s', 'Predicted 1s'))
+    ax.yaxis.set(ticks=(0, 1), ticklabels=('Actual 0s', 'Actual 1s'))
+    ax.set_ylim(1.5, -0.5)
+    for i in range(2):
+        for j in range(2):
+            ax.text(j, i, cm[i, j], ha='center', va='center', color='red')
+    plt.show()
 
 
 # ------------------------------------------------- HELPER --------------------------------------------------
@@ -23,7 +42,7 @@ def metrics(y_true, y_pred):
                 fn += 1
         else:
             n_n += 1
-            if y_pred[i] == 0:
+            if y_pred[i] == -1:
                 tn += 1
             else:
                 fp += 1
@@ -35,7 +54,6 @@ def bcr_compute(tp, tn, fp, fn):
 
 
 def P_compute(model, x_test, y_test, bcr_estim):
-
     y_test_pred = model.predict(x_test)
     test_metrics = metrics(y_test, y_test_pred)
     bcr_test = bcr_compute(test_metrics[0], test_metrics[1], test_metrics[2], test_metrics[3])
@@ -43,8 +61,8 @@ def P_compute(model, x_test, y_test, bcr_estim):
 
     n_p = test_metrics[4]
     n_n = test_metrics[5]
-    p_1 = test_metrics[0]/n_p
-    p_2 = test_metrics[1]/n_n
+    p_1 = test_metrics[0] / n_p
+    p_2 = test_metrics[1] / n_n
     sig = 0.5 * np.sqrt(((1 - p_1) * p_1 / n_p) + (p_2 * (1 - p_2) / n_n))
     p = bcr_test - delta * (1 - np.exp(-delta / sig))
 
@@ -59,137 +77,154 @@ def P_compute(model, x_test, y_test, bcr_estim):
 
     return p, bcr_test
 
+
 # -------------------------------------------- DATA PREPROCESSING--------------------------------------------
 # -----------------------------------------------------------------------------------------------------------
 
-"""
-# Training data
+def data_preprocessing(filename):
+    print("Data preprssing... This step can take a long time\n")
+    df = pd.read_csv(filename, index_col=0)
+    df.replace(to_replace='low', value=0, inplace=True, regex=True)
+    df.replace(to_replace='medium', value=1, inplace=True, regex=True)
+    df.replace(to_replace='high', value=2, inplace=True, regex=True)
 
-train_df = pd.read_csv("ML-A5-2022_train.csv", index_col=0)
-train_df.replace(to_replace='low', value=0, inplace=True, regex=True)
-train_df.replace(to_replace='medium', value=1, inplace=True, regex=True)
-train_df.replace(to_replace='high', value=2, inplace=True, regex=True)
+    imputer = KNNImputer(missing_values=np.nan, n_neighbors=2, weights="uniform")
+    transformed_data = pd.DataFrame(imputer.fit_transform(df.values), dtype=float, columns=df.columns, index=df.index)
+    # train_transformed_data.to_csv(path_or_buf="transformed_data.csv")
+    return transformed_data
 
-# numpy array
-train_np = train_df.values
-
-columns_name = train_df.columns
-index_name = train_df.index
-
-imputer = KNNImputer(missing_values=np.nan, n_neighbors=2, weights="uniform")
-train_imputed_data = imputer.fit_transform(train_np)
-train_transformed_data = pd.DataFrame(train_imputed_data, dtype=float, columns=columns_name, index=index_name)
-train_transformed_data.to_csv(path_or_buf="transformed_data.csv")
-
-# Testing data
-
-test_df = pd.read_csv("ML-A5-2022_test.csv", index_col=0)
-test_df.replace(to_replace='low', value=0, inplace=True, regex=True)
-test_df.replace(to_replace='medium', value=1, inplace=True, regex=True)
-test_df.replace(to_replace='high', value=2, inplace=True, regex=True)
-
-# numpy array
-test_np = test_df.values
-
-test_columns_name = test_df.columns
-test_index_name = test_df.index
-
-imputer = KNNImputer(missing_values=np.nan, n_neighbors=2, weights="uniform")
-test_imputed_data = imputer.fit_transform(test_np)
-test_transformed_data = pd.DataFrame(test_imputed_data, dtype=float, columns=test_columns_name, index=test_index_name)
-test_transformed_data.to_csv(path_or_buf="transformed_test_data.csv")
-"""
-
-# ------------------------------------------------- DATA-----------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------
-
-# Training data
-train_df = pd.read_csv("knn_imputed_data.csv", index_col=0)
-columns_name = train_df.columns
-
-X_train = train_df[columns_name[:34979]]
-Y_train = train_df['label'].replace(to_replace=-1, value=0)
-X_train_np = X_train.values
-Y_train_np = Y_train.values
-
-# Testing data
-test_df = pd.read_csv("transformed_test_data.csv", index_col=0)
-X_test = test_df[columns_name[:34979]]
-test_index_name = test_df.index
 
 # ------------------------------------------FEATURE SELECTION------------------------------------------------
 # -----------------------------------------------------------------------------------------------------------
 
-# Select K-best features with chi2 for hypothesis testing
+def feature_selection(X_train_df, Y_train_df, X_test_df):
+    print("Feature Selection...\n")
+    # Select K-best features with chi2 for hypothesis testing
+    selector = SelectKBest(chi2, k=65)
+    selector.fit(X_train_df, Y_train_df)
+    mask = selector.get_support(indices=True)
+    X_kbest = X_train_df.iloc[:, mask]
+    X_kbest_to_predict = X_test_df.iloc[:, mask]
 
-selector = SelectKBest(chi2, k=200)
-selector.fit(X_train, Y_train)
-mask = selector.get_support(indices=True)
-X_kbest = X_train.iloc[:, mask]
-X_kbest_to_predict = X_test.iloc[:, mask]
+    # Select some genes involves in breast cancer
+    X_revelant = X_train_df[['RAD51-AS1', 'BCAR1', 'PTENP1', 'TP53AIP1', 'STK11', 'CHEK2', 'ATM']]
+    X_revelant_to_predict = X_test_df[['RAD51-AS1', 'BCAR1', 'PTENP1', 'TP53AIP1', 'STK11', 'CHEK2', 'ATM']]
 
-# Select some genes involves in breast cancer
+    # Data standardisation
 
-X_revelant = train_df[['RAD51-AS1', 'BCAR1', 'PTENP1', 'TP53AIP1', 'STK11', 'CHEK2', 'ATM']]
-X_revelant_to_predict = test_df[['RAD51-AS1', 'BCAR1', 'PTENP1', 'TP53AIP1', 'STK11', 'CHEK2', 'ATM']]
+    X = preprocessing.StandardScaler().fit_transform(np.concatenate((X_kbest, X_revelant), axis=1))
+    X_to_predict = preprocessing.StandardScaler().fit_transform(
+        np.concatenate((X_kbest_to_predict, X_revelant_to_predict), axis=1))
 
-# Data standardisation
+    print("shape of data to train :" + str(X.shape))
+    print("shape of data to predict :" + str(X_to_predict.shape))
+    return X, X_to_predict
 
-X_concat = np.concatenate((X_kbest, X_revelant), axis=1)
-X_concat_to_predict = np.concatenate((X_kbest_to_predict, X_revelant_to_predict), axis=1)
-
-X = preprocessing.StandardScaler().fit_transform(X_concat)
-X_to_predict = preprocessing.StandardScaler().fit_transform(X_concat_to_predict)
-
-print("shape of data to train :" + str(X.shape))
-print("shape of data to predict :" + str(X_to_predict.shape))
 
 # ------------------------------------------LOGISTIC REGRESSION----------------------------------------------
 # -----------------------------------------------------------------------------------------------------------
 
-model = LogisticRegression(
-    penalty='l2',
-    dual=False,
-    tol=0.0001,
-    C=1.0,
-    fit_intercept=True,
-    intercept_scaling=1,
-    class_weight='balanced',
-    random_state=None,
-    solver='lbfgs',
-    max_iter=1000,
-    multi_class='auto',
-    verbose=0,
-    warm_start=False,
-    n_jobs=None,
-    l1_ratio=None)
+# -------------------------------------- EXPECTED BCR COMPUTATION -------------------------------------------
+# -----------------------------------------------------------------------------------------------------------
 
-BCR = 0
-P = 0
-for i in range(20):
+def expected_bcr(X_train_np, Y_train_np):
+    print("Expected BCR computing ... \n")
+    BCR = 0
+    P = 0
+    for i in range(10):
 
-    x_train, x_test, y_train, y_test = train_test_split(X, Y_train_np, test_size=0.25, random_state=i)
-    model.fit(x_train, y_train)
+        x_train, x_test, y_train, y_test = train_test_split(X_train_np, Y_train_np, test_size=0.1, random_state=i)
+        model = LogisticRegression(
+            penalty='l1',
+            dual=False,
+            tol=0.0001,
+            C=1.0,
+            fit_intercept=True,
+            class_weight='balanced',
+            random_state=None,
+            solver='saga',
+            max_iter=5000,
+            multi_class='ovr', )
 
-    print(model.score(x_test, y_test))
-    result = P_compute(model, x_test, y_test, 0.7)
+        for j in range(10):
+            x_train2, x_test2, y_train2, y_test2 = train_test_split(x_train, y_train, test_size=0.166, random_state=j)
+            model.fit(x_train2, y_train2)
 
-    BCR += result[1]
-    P += result[0]
+        result = P_compute(model, x_test, y_test, 0.73)
+        BCR += result[1]
+        P += result[0]
 
-# BCR estimator
-BCR_estimator = BCR/20
-# P estimator
-P_estimator = P/20
+    # BCR estimator
+    BCR_estimator = BCR / 10
 
-print("BCR :" + str(BCR_estimator))
-print("P :" + str(P_estimator))
-
-# store predicted labels in csv file
-y_predicted = np.reshape(model.predict(X_to_predict), (-1, 1))
-y_predicted_df = pd.DataFrame(data=y_predicted, dtype=int, columns=["Prediction"], index=test_index_name)
-y_predicted_final = y_predicted_df.replace(to_replace=0, value=-1)
-y_predicted_final.to_csv(path_or_buf="y_predicted.csv")
+    print("BCR_estim :" + str(BCR_estimator))  # final BCR estim = 0.735
+    print("P :" + str(P / 10))
+    return BCR_estimator
 
 
+# -------------------------------------- FINAL MODEL TRAINING -------------------------------------------
+# -------------------------------------------------------------------------------------------------------
 
+def train_and_predict(X_train_np, Y_train_np, X_to_predict_np, test_index_name=None, store=False):
+    print("Final model training and label predicting...\n")
+    final_model = LogisticRegression(
+        penalty='l1',
+        dual=False,
+        tol=0.0001,
+        C=1.0,
+        fit_intercept=True,
+        class_weight='balanced',
+        random_state=None,
+        solver='saga',
+        max_iter=5000,
+        multi_class='ovr', )
+
+    BCR_verif = 0
+    P_verif = 0
+    for i in range(20):
+        x_train, x_test, y_train, y_test = train_test_split(X_train_np, Y_train_np, test_size=0.1, random_state=i)
+        final_model.fit(x_train, y_train)
+        final_model.score(x_test, y_test)
+        result = P_compute(final_model, x_test, y_test, 0.735)
+        BCR_verif += result[1]
+        P_verif += result[0]
+        if i == 19:
+            visualize(x_test, y_test, final_model)
+
+    print("BCR :" + str(BCR_verif / 20))
+    print("P :" + str(P_verif / 20))
+
+    # Predicted labels
+    y_predicted = np.reshape(final_model.predict(X_to_predict_np), (-1, 1))
+
+    if store:
+        y_predicted_df = pd.DataFrame(data=y_predicted, dtype=int, columns=["Prediction"], index=test_index_name)
+        # y_predicted_final = y_predicted_df.replace(to_replace=0, value=-1)
+        y_predicted_df.to_csv(path_or_buf="y_predic_logregress_final.csv")
+
+    return y_predicted
+
+
+# ----------------------------------------------- MAIN --------------------------------------------------
+# -------------------------------------------------------------------------------------------------------
+
+if __name__ == '__main__':
+
+    train_preprocessed_df = data_preprocessing("ML-A5-2022_train.csv")
+    test_preprocessed_df = data_preprocessing("ML-A5-2022_test.csv")
+    columns_name = train_preprocessed_df.columns
+    test_index_name = test_preprocessed_df.index
+
+    # Train data
+    X_train_df = train_preprocessed_df[columns_name[:34979]]
+    Y_train_df = train_preprocessed_df['label']
+    Y_train_np = Y_train_df.values
+    # Test data
+    X_test_df = test_preprocessed_df[columns_name[:34979]]
+
+    X_train_np, X_to_predict_np = feature_selection(X_train_df, Y_train_df, X_test_df)
+
+    BCR_expected = expected_bcr(X_train_np, Y_train_np)
+    print("Expected BCR = " + str(BCR_expected))
+
+    Y_predicted = train_and_predict(X_train_np, Y_train_np, X_to_predict_np, test_index_name, True)
